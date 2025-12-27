@@ -7,5 +7,6 @@ build/*.html
 build/*.pkg
 build/*.zip
 build/*
+build/winhtop
 
 # apparently i cant just ignore the build folder fml
