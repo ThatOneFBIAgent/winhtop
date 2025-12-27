@@ -1,4 +1,11 @@
-build\winhtop*
-__pycache__/*
 __pycache__
+*.toc
+*.pyz
 *.pyc
+build/*.txt
+build/*.html
+build/*.pkg
+build/*.zip
+build/*
+
+# apparently i cant just ignore the build folder fml
