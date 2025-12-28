@@ -78,7 +78,7 @@ def handle_party_command():
                 state.party_mode = True
                 state.party_prev_refresh_rate = state.current_refresh_rate
                 state.current_refresh_rate = "party"
-                state.status_message = "🎉 Party mode activated! Type 'party' again to stop."
+                state.status_message = "🎉 Party mode activated! Type 'party' again to stop. (Process update stopped)"
             else:
                 state.party_visualizer = None
                 state.status_message = "Some people in this party are missing..."
@@ -117,9 +117,14 @@ def execute_command(cmd_str):
         return
     
     if cmd == "speed":
-        speeds = list(REFRESH_RATES.keys())
-        if arg.lower() in REFRESH_RATES:
-            state.current_refresh_rate = arg.lower()
+        speeds = [k for k in REFRESH_RATES.keys() if k != "party"]
+        key = arg.lower()
+        if key == "party":
+            state.status_message = "Not without music you dont."
+            return
+        if key in REFRESH_RATES:
+            state.current_refresh_rate = key
+            state.party_mode = False # this also deactivates party mode if using speed command instead of repeating party command
             state.status_message = f"Refresh rate: {state.current_refresh_rate} ({REFRESH_RATES[state.current_refresh_rate]}s)"
         else:
             state.status_message = f"Usage: speed [{'/'.join(speeds)}]"

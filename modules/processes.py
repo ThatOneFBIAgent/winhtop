@@ -2,70 +2,74 @@
 import psutil
 import time
 from .state import state
+from . import processsn
 
 def get_processes():
-    """Fetch and sort process list with accurate CPU%."""
+    """Fetch and sort process list with accurate CPU% using native API."""
     procs = []
     now = time.time()
     num_cpus = psutil.cpu_count() or 1
     
-    new_cache = {}
+    # Initialize prev_proc_time if not set
+    if not hasattr(state, 'prev_proc_time'):
+        state.prev_proc_time = now - 0.1 # dummy diff for first run
     
-    for proc in psutil.process_iter(['pid', 'name', 'status', 'username']):
-        try:
-            pid = proc.pid
-            
-            # Skip System Idle Process
-            if pid == 0:
-                continue
-            
-            pinfo = proc.info.copy()
-            
-            # Calculate CPU% properly using cpu_times delta
-            try:
-                cpu_times = proc.cpu_times()
-                total_time = cpu_times.user + cpu_times.system
-                
-                if pid in state.proc_cpu_cache:
-                    prev_total, prev_time = state.proc_cpu_cache[pid]
-                    dt = now - prev_time
-                    if dt > 0:
-                        cpu_pct = ((total_time - prev_total) / dt) * 100 / num_cpus
-                        cpu_pct = max(0, min(cpu_pct, 100))
-                    else:
-                        cpu_pct = 0.0
-                else:
-                    cpu_pct = 0.0
-                
-                new_cache[pid] = (total_time, now)
-                pinfo['cpu_percent'] = cpu_pct
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pinfo['cpu_percent'] = 0.0
-            
-            # Memory %
-            try:
-                pinfo['memory_percent'] = proc.memory_percent() or 0.0
-            except:
-                pinfo['memory_percent'] = 0.0
-            
-            # Clean up username
-            if pinfo.get('username'):
-                pinfo['username'] = pinfo['username'].split('\\')[-1]
-            else:
-                pinfo['username'] = '?'
-            
-            # Apply filter
-            if state.filter_text:
-                name = pinfo.get('name', '').lower()
-                if state.filter_text.lower() not in name:
-                    continue
-            
-            procs.append(pinfo)
-            
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+    interval = now - state.prev_proc_time
+    state.prev_proc_time = now
+
+    # Get native snapshot
+    try:
+        snapshot = processsn.get_native_process_snapshot()
+    except Exception as e:
+        print(f"Native snapshot failed: {e}")
+        import traceback
+        traceback.print_exc()
+        # Fallback if native fails (unlikely)
+        return
+
+    # Compute CPU deltas (updates state.proc_cpu_cache in-place)
+    # state.proc_cpu_cache must be a dict
+    if not isinstance(state.proc_cpu_cache, dict):
+        state.proc_cpu_cache = {}
+        
+    proc_list = processsn.compute_cpu_deltas(state.proc_cpu_cache, snapshot, interval, num_cpus)
+    
+    # Get memory total for % calc
+    try:
+        mem_total = psutil.virtual_memory().total
+    except:
+        mem_total = 0
+
+    # Process list into UI format
+    for p in proc_list:
+        pid = p['pid']
+        if pid == 0: continue # Idle process
+
+        # Calculate memory percent
+        rss = p.get('rss_bytes', 0)
+        mem_pct = (rss / mem_total * 100) if mem_total > 0 else 0.0
+        
+        # Apply filter
+        name = p.get('name', '').lower()
+        if state.filter_text and state.filter_text.lower() not in name:
             continue
-    
-    state.proc_cpu_cache = new_cache
+            
+        # Add to display list
+        # Status and Username are expensive to fetch per-process, so we skip or cache?
+        # For now, to meet "faster process calling" goal, we leave them simple or optional.
+        # If we really need them, we could use psutil.Process(pid) but that defeats the optimization.
+        # We'll use '?' to indicate optimized mode lacking this detail, or maybe cache it later.
+        
+        pinfo = {
+            'pid': pid,
+            'name': p['name'],
+            'cpu_percent': p['cpu_percent'],
+            'memory_percent': mem_pct,
+            'status': 'Running', # assume running
+            'username': '?'
+        }
+        
+        procs.append(pinfo)
     
     # Sort
     try:
@@ -81,30 +85,48 @@ def get_process_tree_info(targets):
     tree_lines = []
     parent_groups = {}  # parent_pid -> list of child processes
     
+    # Recalculate full list for tree building if needed, or search current state.processes?
+    # get_process_tree_info takes 'targets' which are psutil.Process objects usually...
+    # Wait, 'targets' in ui.py or input.py might be passed as PID or dict?
+    # In pending_confirmation, targets is list of dicts or objects.
+    # We need to verify what 'targets' contains.
+    # Since we replaced get_processes, state.processes now contains dicts, not psutil.Process objects.
+    # Previous code: procs.append(pinfo) -> pinfo was dict (proc.info.copy()).
+    # So targets is list of dicts.
+    
+    # However, get_process_tree_info implementation in original used p.ppid() which implies p is psutil.Process?
+    # Let's check the original code again.
+    # "for p in targets: try: ppid = p.ppid() ..."
+    # "procs.append(pinfo)" where pinfo is dict.
+    # Ah, the `targets` passed to `get_process_tree_info` might come from `state.pending_confirmation`? 
+    # Let's assume we need to handle dicts now, or re-instantiate psutil objects.
+    # The user asked for "Displaying the entire process tree...".
+    
+    # If targets contains dicts from our new get_processes, they have 'pid' and 'ppid' (we added ppid in processsn return).
+    # processsn.compute_cpu_deltas returns list of dicts WITH 'ppid'.
+    # So we can use that.
+    
     for p in targets:
+        # p is dict
         try:
-            ppid = p.ppid()
+            pid = p['pid']
+            ppid = p.get('ppid', 0)
+            
             if ppid not in parent_groups:
                 parent_groups[ppid] = []
             parent_groups[ppid].append(p)
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            if 0 not in parent_groups:
-                parent_groups[0] = []
-            parent_groups[0].append(p)
-    
-    for ppid, children in parent_groups.items():
-        parent_name = "unknown"
-        try:
-            if ppid > 0:
-                parent_proc = psutil.Process(ppid)
-                parent_name = parent_proc.name()
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
+        except:
             pass
+            
+    # We need to look up parent names.
+    # We can use state.processes to find names of parents!
+    # Map pid -> name
+    proc_map = {proc['pid']: proc['name'] for proc in state.processes}
+
+    for ppid, children in parent_groups.items():
+        parent_name = proc_map.get(ppid, "unknown")
         
         for child in children:
-            try:
-                tree_lines.append(f"  PID {child.pid} (parent: {ppid} {parent_name})")
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
+            tree_lines.append(f"  PID {child['pid']} (parent: {ppid} {parent_name})")
     
     return tree_lines

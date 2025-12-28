@@ -13,7 +13,7 @@
                                                                                                          \|____|                        
 ```
 
-A terminal-based task manager for Windows, inspired by `htop`.
+A text based user interface (TUI) task manager for Windows, inspired by `htop`.
 
 ## Features
 
@@ -44,10 +44,12 @@ A terminal-based task manager for Windows, inspired by `htop`.
 | `info <pid>` | Show detailed process info |
 | `sort <column>` | Sort by `pid`, `cpu`, `mem`, or `name` |
 | `filter <text>` | Filter processes by name |
-| `speed <rate>` | Set refresh: `slow`, `medium`, `fast`, `superfast` |
-| `export [file]` | Export process list to file |
+| `speed <rate>` | Set refresh: `slow`, `medium`, `fast`, `superfast`, `ultrafast` |
+| `export [file]` | Export process list to file (default: `processes.txt`) |
 | `quit` | Exit the application |
 | `showdrives` | Toggle display of all drives |
+
+Do be warned that faster refresh rates (above superfast) cause delta calculations to drift heavily, making the general values less accurate and for the bars to jump unexpectedly.
 
 ### Controls
 | Key | Action |
@@ -61,7 +63,10 @@ A terminal-based task manager for Windows, inspired by `htop`.
 
 ## Installation (Setup)
 
-Simply go to releases and download the latest installer or use the ps1 files attached, choose your options (ps1 does not support this) and you're ready to use winhtop in the terminal. Uninstalling should be easy aswell.
+Simply go to releases and download the latest installer or use the ps1 files attached, choose your options (ps1 does not support this) and you're ready to use winhtop in the terminal. Uninstalling should be easy aswell thru the installer, or the uninstall ps1 file.
+
+Small disclaimer:
+Some security vendors may block the main .exe due using the same headers as malware (this is a known pyinstaller [issue](https://github.com/pyinstaller/pyinstaller/issues/6754), i'll be looking into using a different method), but rest assured it can't do anything malicious. 
 
 ## Requirements
 

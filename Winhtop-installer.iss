@@ -4,7 +4,7 @@
 
 [Setup]
 AppName=WinHtop
-AppVersion=0.4
+AppVersion=0.5
 AppPublisher=Iza Carlos
 DefaultDirName={localappdata}\Programs\WinHtop
 DisableDirPage=yes
@@ -15,7 +15,7 @@ Compression=lzma
 SolidCompression=yes
 UninstallDisplayIcon={app}\winhtop.exe
 PrivilegesRequired=lowest
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=force
 UsePreviousAppDir=yes
 VersionInfoDescription=WinHtop Installer
@@ -57,4 +57,5 @@ Flags: runhidden; Tasks: addpath
 ; Remove PATH entry on uninstall (only user scope)
 Filename: "{cmd}"; \
 Parameters: "/C powershell -command ""$p=[Environment]::GetEnvironmentVariable('Path','User'); $np=$p -replace ';{app}',''; [Environment]::SetEnvironmentVariable('Path',$np,'User')"""; \
-Flags: runhidden
+Flags: runhidden; \
+RunOnceId: "RemoveUserPathWinHtop"

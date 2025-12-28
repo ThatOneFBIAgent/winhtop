@@ -1,5 +1,5 @@
 """
-Audio Visualizer module for Party Mode easter egg.
+Audio Visualizer module.
 Uses WASAPI loopback to capture Windows audio output and perform FFT analysis.
 """
 
@@ -58,8 +58,11 @@ class AudioVisualizer:
         # Pre-compute CPU frequency bands (log-spaced from 200Hz to 16kHz)
         self._cpu_freq_bands = self._compute_cpu_bands()
         
+        # Global amplitude multiplier for fine-tuning
+        self.amplitude = 2.0
+        
         # Smoothing factor (0-1, higher = smoother but less responsive)
-        self._smoothing = 0.3
+        self._smoothing = 0.4
     
     def _compute_cpu_bands(self):
         """Compute log-spaced frequency bands for CPU cores."""
@@ -111,19 +114,40 @@ class AudioVisualizer:
         fft = np.fft.rfft(windowed)
         magnitudes = np.abs(fft)
         
-        # Normalize (with some headroom to prevent clipping)
-        max_mag = np.max(magnitudes)
-        if max_mag > 0:
-            magnitudes = magnitudes / max_mag
+        # Normalize by block size to get approx 0-1 range
+        # Increasing the divisor makes it more sensitive (e.g., /12 instead of /4)
+        magnitudes = magnitudes / (len(audio) / 12)
         
-        # Extract band magnitudes
-        ram_mag = self._get_band_magnitude(magnitudes, self.BASS_LOW, self.BASS_HIGH) * 100
-        swap_mag = self._get_band_magnitude(magnitudes, self.LOW_MID_LOW, self.LOW_MID_HIGH) * 100
-        disk_mag = self._get_band_magnitude(magnitudes, self.HIGH_MID_LOW, self.HIGH_MID_HIGH) * 100
+        # Extract band magnitudes using a custom scaling
+        # We don't normalize the whole array anymore, so volume is preserved.
+        
+        def get_scaled_mag(low, high, boost=1.0):
+            val = self._get_band_magnitude(magnitudes, low, high)
+            
+            # Apply global amplitude and local boost
+            val = val * self.amplitude * boost
+            
+            if val <= 0.0001: 
+                return 0.0
+            
+            # Sharper log curve to boost low-level signals more aggressively
+            # val=0.01 -> 0.17
+            # val=0.1 -> 0.47
+            # val=1.0 -> 1.0
+            scaled = np.log10(1 + 39 * val) / np.log10(40)
+            
+            return min(100.0, scaled * 100.0)
+
+        # Apply mild weighting to balance spectrum (bass is naturally strong)
+        ram_mag = get_scaled_mag(self.BASS_LOW, self.BASS_HIGH, boost=0.7) # Bass
+        swap_mag = get_scaled_mag(self.LOW_MID_LOW, self.LOW_MID_HIGH, boost=1.0) # Low Mid
+        disk_mag = get_scaled_mag(self.HIGH_MID_LOW, self.HIGH_MID_HIGH, boost=1.3) # High Mid
         
         cpu_mags = []
-        for low, high in self._cpu_freq_bands:
-            mag = self._get_band_magnitude(magnitudes, low, high) * 100
+        for i, (low, high) in enumerate(self._cpu_freq_bands):
+            # Progressive boost for higher cpu bands
+            freq_boost = 1.0 + (i / len(self._cpu_freq_bands)) * 2.5
+            mag = get_scaled_mag(low, high, boost=freq_boost)
             cpu_mags.append(mag)
         
         # Apply smoothing and update shared state
@@ -141,138 +165,112 @@ class AudioVisualizer:
         return old_val * self._smoothing + new_val * (1 - self._smoothing)
     
     def _find_loopback_device(self):
-        """Pick the best available loopback / virtual output device.
-        
-        Priority order:
-        1. Voicemeeter B1 virtual output bus (captures all audio sent to B1)
-        2. Voicemeeter B2/B3 buses
-        3. Voicemeeter Input / AUX Input (capture what's being sent to VM)
-        4. Stereo Mix / Loopback (Windows default capture)
-        5. Any other WASAPI input
+        """
+        Pick the best audio source:
+        1. Virtual Output (Voicemeeter B1/B2, VB-Cable) - Direct Capture
+        2. System Default Output - WASAPI Loopback
         """
         try:
             devices = sd.query_devices()
+            host_apis = sd.query_hostapis()
+            
+            # Get default output info for fallback matching
+            def_out = None
+            try:
+                idx = sd.default.device[1]
+                if idx is not None:
+                    def_out = sd.query_devices(idx)
+            except: pass
+            
             candidates = []
-
+            
             for i, dev in enumerate(devices):
-                if dev['max_input_channels'] <= 0:
+                # Must be WASAPI for compatibility/loopback support
+                if 'wasapi' not in host_apis[dev['hostapi']]['name'].lower():
                     continue
-
+                    
                 name = dev['name'].lower()
-                api = sd.query_hostapis(dev['hostapi'])['name'].lower()
-
-                # Only prioritize WASAPI devices (best quality on Windows)
-                if 'wasapi' not in api:
-                    # WDM/DirectSound fallback - low priority
-                    if 'wdm' in api or 'directsound' in api:
-                        if 'voicemeeter' in name or 'stereo mix' in name:
-                            candidates.append((100, i, dev))
-                    continue
-
-                # ---- Voicemeeter B buses (virtual outputs) ----
-                # These capture mixed audio output, B1 is typically the main bus
-                if 'voicemeeter' in name and 'out' in name:
-                    if 'out b1' in name or ('out b' not in name and 'out a' not in name and 'aux' not in name and 'vaio3' not in name):
-                        # B1 is highest priority (or generic "Voicemeeter Out" which is B1)
-                        candidates.append((0, i, dev))
-                    elif 'out b2' in name:
-                        candidates.append((1, i, dev))
-                    elif 'out b3' in name:
-                        candidates.append((2, i, dev))
-                    # Skip A buses (hardware out, not what we want)
-                    continue
-
-                # ---- Voicemeeter Inputs (capture what's sent to VM) ----
-                if 'voicemeeter' in name and ('input' in name or 'aux' in name):
-                    if 'aux' in name:
-                        candidates.append((3, i, dev))  # AUX input
-                    else:
-                        candidates.append((4, i, dev))  # Main input
-                    continue
-
-                # ---- Stereo Mix / Loopback (good generic source) ----
-                if 'loopback' in name or 'stereo mix' in name or 'what u hear' in name:
-                    candidates.append((5, i, dev))
-                    continue
-
-                # ---- Other WASAPI inputs (last resort) ----
-                candidates.append((50, i, dev))
-
-            if not candidates:
-                return None
-
-            # Pick lowest priority value (highest priority device)
-            candidates.sort(key=lambda x: x[0])
-            _, index, dev = candidates[0]
-            return index
+                
+                # Priority 0: Known Virtual Outputs (Capture devices)
+                # These are "Input" devices in Windows (in_ch > 0) but carry output audio
+                if dev['max_input_channels'] > 0:
+                    if 'voicemeeter' in name and 'out' in name:
+                        # Prioritize B1/Main mix
+                        if 'out b1' in name:
+                            candidates.append((0, i, False, dev['name']))
+                        elif 'out b' in name:
+                            candidates.append((1, i, False, dev['name']))
+                        else:
+                            candidates.append((2, i, False, dev['name']))
+                    
+                    elif 'virtual cable' in name and 'out' in name:
+                        candidates.append((0, i, False, dev['name']))
+                
+                # Priority 10: System Default Output (Loopback)
+                # This ensures we get what the user is actually hearing if they aren't using Voicemeeter capture
+                if def_out and dev['max_output_channels'] > 0:
+                    # Relaxed name matching to find the WASAPI version of the default output
+                    if def_out['name'] in dev['name'] or dev['name'] in def_out['name']:
+                        candidates.append((10, i, True, dev['name']))
+            
+            # Sort by score
+            if candidates:
+                candidates.sort(key=lambda x: x[0])
+                return candidates[0][1], candidates[0][2], candidates[0][3]
+                
+            # Fallback: If nothing matched, try to force the default output index as a loopback source
+            # This is a last resort for systems where name matching fails completely
+            if def_out:
+                 is_wasapi = 'wasapi' in host_apis[def_out['hostapi']]['name'].lower()
+                 return sd.default.device[1], is_wasapi, def_out['name']
+                 
+            return None, False, None
 
         except Exception:
-            return None
+            return None, False, None
     
     def start(self):
         """Start audio capture."""
         if self._running:
             return True
         
-        device_id = self._find_loopback_device()
+        device_id, loopback_required, device_name = self._find_loopback_device()
         
-        # Common sample rates to try (in order of preference)
-        # Start with device default, then try common rates
-        sample_rates_to_try = [48000, 44100, 96000]
-        
-        # Get device's default sample rate and put it first
-        if device_id is not None:
-            try:
-                dev_info = sd.query_devices(device_id)
-                default_rate = int(dev_info.get('default_samplerate', 48000))
-                if default_rate not in sample_rates_to_try:
-                    sample_rates_to_try.insert(0, default_rate)
-                else:
-                    # Move default to front
-                    sample_rates_to_try.remove(default_rate)
-                    sample_rates_to_try.insert(0, default_rate)
-            except Exception:
-                pass
-        
+        if device_id is None:
+            return False
+
         # Build list of configurations to try
         configs_to_try = []
         
-        if device_id is not None:
-            for sample_rate in sample_rates_to_try:
-                # Try with WASAPI settings, 2 channels
-                configs_to_try.append({
-                    'device': device_id,
-                    'samplerate': sample_rate,
-                    'blocksize': self.block_size,
-                    'channels': 2,
-                    'extra_settings': self._get_wasapi_settings()
-                })
-                # Try without WASAPI settings, 2 channels
-                configs_to_try.append({
-                    'device': device_id,
-                    'samplerate': sample_rate,
-                    'blocksize': self.block_size,
-                    'channels': 2,
-                    'extra_settings': None
-                })
-                # Try with 1 channel
-                configs_to_try.append({
-                    'device': device_id,
-                    'samplerate': sample_rate,
-                    'blocksize': self.block_size,
-                    'channels': 1,
-                    'extra_settings': None
-                })
-        
-        # Also try default device as last fallback
-        for sample_rate in sample_rates_to_try:
+        sample_rates = [48000, 44100, 96000]
+        try:
+            dev_info = sd.query_devices(device_id)
+            default_rate = int(dev_info.get('default_samplerate', 48000))
+            if default_rate not in sample_rates:
+                sample_rates.insert(0, default_rate)
+        except: pass
+
+        for rate in sample_rates:
+            # Config 1: Stereo
             configs_to_try.append({
-                'device': None,
-                'samplerate': sample_rate,
+                'device': device_id,
+                'samplerate': rate,
+                'blocksize': self.block_size,
+                'channels': 2,
+                'extra_settings': self._get_wasapi_settings(loopback=loopback_required)
+            })
+            
+            # Config 2: Mono (Fallback)
+            configs_to_try.append({
+                'device': device_id,
+                'samplerate': rate,
                 'blocksize': self.block_size,
                 'channels': 1,
-                'extra_settings': None
+                'extra_settings': self._get_wasapi_settings(loopback=loopback_required)
             })
+        
+        # CRITICAL: We DO NOT fall back to device=None here.
+        # device=None opens the Default Input (Mic), which we strictly want to avoid.
         
         for config in configs_to_try:
             try:
@@ -282,19 +280,20 @@ class AudioVisualizer:
                     self._stream = sd.InputStream(callback=self._audio_callback, extra_settings=extra, **config)
                 else:
                     self._stream = sd.InputStream(callback=self._audio_callback, **config)
+                
                 self._stream.start()
                 self._running = True
-                self.sample_rate = actual_rate  # Update for FFT calculations
+                self.sample_rate = actual_rate
                 return True
             except Exception:
                 continue
         
         return False
     
-    def _get_wasapi_settings(self):
-        """Get WASAPI settings if available."""
+    def _get_wasapi_settings(self, loopback=False):
+        """Get WASAPI settings."""
         try:
-            return sd.WasapiSettings(exclusive=False)
+            return sd.WasapiSettings(exclusive=False, loopback=loopback)
         except Exception:
             return None
     
@@ -335,5 +334,3 @@ class AudioVisualizer:
     def is_running(self):
         """Check if audio capture is active."""
         return self._running
-
-# TODO: make this audio amplitude sensitive (ergo the audio in being louder should make the bars taller)

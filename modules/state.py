@@ -12,7 +12,7 @@ class AppState:
         self.scroll_offset = 0
         self.filter_text = ""
         self.show_all_drives = False
-        self.current_refresh_rate = "slow"
+        self.current_refresh_rate = "medium"
         
         # Data
         self.processes = []
