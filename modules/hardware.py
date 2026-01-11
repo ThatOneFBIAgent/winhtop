@@ -132,6 +132,17 @@ def get_hardware_info():
 
     $chosen
     '''
+    # powershell command breakdown:
+    # 1- get disk info for letter 'c' drives
+    # 2- get partition info for disk
+    # 3- get disk info for partition
+    # 4- select first disk
+    # 5- get friendly name (if exists)
+    # 6- get model, get bus type, get size
+    # 7- get chosen name
+    # 8- if no chosen name, use disk info
+    # 9- if chosen name is less than 8 chars, add bus type and size
+    # 10- return chosen name
 
     try:
         result = subprocess.run(

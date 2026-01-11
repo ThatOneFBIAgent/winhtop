@@ -85,27 +85,8 @@ def get_process_tree_info(targets):
     tree_lines = []
     parent_groups = {}  # parent_pid -> list of child processes
     
-    # Recalculate full list for tree building if needed, or search current state.processes?
-    # get_process_tree_info takes 'targets' which are psutil.Process objects usually...
-    # Wait, 'targets' in ui.py or input.py might be passed as PID or dict?
-    # In pending_confirmation, targets is list of dicts or objects.
-    # We need to verify what 'targets' contains.
-    # Since we replaced get_processes, state.processes now contains dicts, not psutil.Process objects.
-    # Previous code: procs.append(pinfo) -> pinfo was dict (proc.info.copy()).
-    # So targets is list of dicts.
-    
-    # However, get_process_tree_info implementation in original used p.ppid() which implies p is psutil.Process?
-    # Let's check the original code again.
-    # "for p in targets: try: ppid = p.ppid() ..."
-    # "procs.append(pinfo)" where pinfo is dict.
-    # Ah, the `targets` passed to `get_process_tree_info` might come from `state.pending_confirmation`? 
-    # Let's assume we need to handle dicts now, or re-instantiate psutil objects.
-    # The user asked for "Displaying the entire process tree...".
-    
-    # If targets contains dicts from our new get_processes, they have 'pid' and 'ppid' (we added ppid in processsn return).
-    # processsn.compute_cpu_deltas returns list of dicts WITH 'ppid'.
-    # So we can use that.
-    
+    # targets consists of process info dicts (including 'ppid') from the native snapshot
+    # instead of psutil.Process objects to maintain performance and consistency.
     for p in targets:
         # p is dict
         try:
@@ -118,8 +99,6 @@ def get_process_tree_info(targets):
         except:
             pass
             
-    # We need to look up parent names.
-    # We can use state.processes to find names of parents!
     # Map pid -> name
     proc_map = {proc['pid']: proc['name'] for proc in state.processes}
 

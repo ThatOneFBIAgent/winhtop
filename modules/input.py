@@ -308,4 +308,5 @@ def handle_input():
         elif ch == '\x03':
             state.app_running = False
         elif ch.isprintable():
-            state.input_buffer += ch
+            if len(state.input_buffer) < 120:
+                state.input_buffer += ch

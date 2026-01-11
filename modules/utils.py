@@ -6,9 +6,12 @@ def get_terminal_size():
     """Get terminal dimensions."""
     try:
         size = os.get_terminal_size()
-        return size.columns, size.lines
+        if size.columns < 79 or size.lines < 18:
+            return size.columns, size.lines, True
+        else:
+            return size.columns, size.lines, False
     except:
-        return 100, 30
+        return 100, 30, False
 
 def draw_bar(percent, width=20, color=C_GREEN, empty_char="░", fill_char="█"):
     """Draw a colored progress bar."""

@@ -23,7 +23,7 @@ try:
     from modules.utils import *
     from modules.hardware import get_hardware_info, update_system_stats, update_system_stats_fast, update_system_stats_slow
     from modules.processes import get_processes
-    from modules.ui import render
+    from modules.ui import render, render_startup
     from modules.input import handle_input 
 except ImportError as e:
     print(f"Error loading modules: {e}")
@@ -46,16 +46,87 @@ def main():
     sys.stdout.write("\033[2J\033[?25l")
     sys.stdout.flush()
     
-    # Fetch hardware info once
-    get_hardware_info()
+    # Total initialization steps for progress tracking
+    TOTAL_STEPS = 100
+    current_step = 0
     
-    # Prime CPU measurements
+    # Helper to advance progress
+    def bump_progress(amount=1, msg=None):
+        nonlocal current_step
+        current_step += amount
+        if current_step > TOTAL_STEPS: current_step = TOTAL_STEPS
+        render_startup(current_step, TOTAL_STEPS, msg)
+
+    # Step: Initial splash
+    bump_progress(5, "Initializing terminal magic...")
+    
+    # Step: Poke kernel (enable virtual terminal)
+    bump_progress(5, "Poking the system kernel...")
+    time.sleep(0.1)
+    
+    # Step: Fetch CPU info (Can take 1-2s)
+    bump_progress(5, "Interrogating your CPU...")
+    get_hardware_info() 
+    
+    # Step: GPU & More
+    bump_progress(10, "Waking up the GPU...")
+    time.sleep(0.05)
+    
+    # Step: Collect process breadcrumbs
+    bump_progress(5, "Collecting process breadcrumbs...")
     psutil.cpu_percent(percpu=True)
-    for proc in psutil.process_iter():
+    
+    # Step: Prime individual process CPU times (Main delay)
+    bump_progress(5, "Priming the performance counters...")
+    
+    # We will use about 50 steps for this loop
+    proc_list = list(psutil.process_iter()) # Snapshot first
+    total_procs = len(proc_list)
+    
+    # Flavor text for the loop
+    flavor_msgs = [
+        "Reordering electrons...",
+        "Compiling bitstreams...",
+        "Calibrating flux capacitor...",
+        "Reticulating splines...",
+        "Defragmenting ghosts...",
+        "Scanning quantum fluctuations..."
+    ]
+    
+    import random
+    
+    for i, proc in enumerate(proc_list):
         try:
             proc.cpu_times()
         except:
             pass
+            
+        # Update UI every chunk of processes
+        if i % 10 == 0 or i == total_procs - 1:
+            # Calculate progress within the loop (allocating 50 steps)
+            loop_progress = int((i / total_procs) * 50)
+            base_progress = 35 # Steps before this loop
+            
+            # Switch flavor text occasionally
+            flavor = "Priming performance counters..."
+            if i % 40 == 0:
+                 flavor = flavor_msgs[(i // 40) % len(flavor_msgs)]
+                 
+            render_startup(base_progress + loop_progress, TOTAL_STEPS, f"{flavor} ({int(i/total_procs*100)}%)")
+            
+    current_step = 85 # Jump to after loop
+    
+    # Step: Initial system stats
+    bump_progress(5, "Gathering system vitals...")
+    update_system_stats()
+    
+    # Step: Final polish
+    bump_progress(5, "Polishing the UI...")
+    get_processes()
+    
+    # Step: Ready
+    bump_progress(5, "Ready to go!")
+    time.sleep(0.3)
     
     try:
         last_update = 0

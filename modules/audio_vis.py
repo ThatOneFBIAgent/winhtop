@@ -334,3 +334,5 @@ class AudioVisualizer:
     def is_running(self):
         """Check if audio capture is active."""
         return self._running
+
+# dont ask how many hours were spent on a FUCKING easter egg of all things

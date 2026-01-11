@@ -1,11 +1,16 @@
 """Process info/list module using native windows APIs"""
 import ctypes
 import ctypes.wintypes as wt
+import time
 
 # Windows types for NtQuerySystemInformation
 ntdll = ctypes.WinDLL("ntdll")
 
 SystemProcessInformation = 5
+
+# Cache for EMA values
+_last_snapshot_time = None
+_ema_cache = {}
 
 class UNICODE_STRING(ctypes.Structure):
     _fields_ = [
@@ -21,7 +26,7 @@ class SYSTEM_THREAD_INFORMATION(ctypes.Structure):
         ("CreateTime", wt.LARGE_INTEGER),
         ("WaitTime", wt.ULONG),
         ("StartAddress", wt.LPVOID),
-        ("ClientId", wt.LARGE_INTEGER * 1),  # not used here
+        ("ClientId", wt.LARGE_INTEGER * 1),  # not used here but we take anyway
         ("Priority", wt.LONG),
         ("BasePriority", wt.LONG),
         ("ContextSwitches", wt.ULONG),
@@ -112,7 +117,7 @@ def get_native_process_snapshot():
             continue
 
         if ret != 0:
-            raise OSError("NtQuerySystemInformation failed")
+            raise OSError("NtQuerySystemInformation failed, WinHTop is unable to retrieve process information")
 
         break
 
@@ -172,11 +177,17 @@ def compute_cpu_deltas(prev_cache, curr_snapshot, interval_seconds, cpu_count):
         list[dict]:
             proc_list with computed stats
     """
+    global _last_snapshot_time
+    smoothing_factor = 0.2
     results = []
 
-    # Clamp interval to avoid division by zero or noisy spikes on very fast updates
-    if interval_seconds < 0.05:
-        interval_seconds = 0.05
+    # use perf counter for more precision
+    now = time.perf_counter()
+    if _last_snapshot_time is None:
+        interval = 0.1 # Default for first run
+    else:
+        interval = now - _last_snapshot_time
+    _last_snapshot_time = now
 
     # Track which pids we see in this snapshot to evict dead ones later
     seen_pids = set()
@@ -184,7 +195,6 @@ def compute_cpu_deltas(prev_cache, curr_snapshot, interval_seconds, cpu_count):
     for proc in curr_snapshot:
         pid = proc["pid"]
         seen_pids.add(pid)
-
         prev = prev_cache.get(pid)
 
         total_time_now = proc["user_time_100ns"] + proc["kernel_time_100ns"]
@@ -192,32 +202,36 @@ def compute_cpu_deltas(prev_cache, curr_snapshot, interval_seconds, cpu_count):
         if prev:
             total_time_prev = prev["user_time_100ns"] + prev["kernel_time_100ns"]
             dt_100ns = max(0, total_time_now - total_time_prev)
-
-            # convert 100ns units to seconds
             dt_seconds = dt_100ns / 10_000_000.0
-
-            cpu = (dt_seconds / interval_seconds) * 100 / max(1, cpu_count)
+            
+            # Raw calculation
+            raw_cpu = (dt_seconds / interval) * 100 / max(1, cpu_count)
+            raw_cpu = max(0.0, min(raw_cpu, 100.0))
+            
+            # Apply EMA Smoothing: (New * Alpha) + (Old * (1 - Alpha))
+            prev_smooth = _ema_cache.get(pid, raw_cpu)
+            smooth_cpu = (raw_cpu * smoothing_factor) + (prev_smooth * (1.0 - smoothing_factor))
+            _ema_cache[pid] = smooth_cpu
         else:
-            cpu = 0.0
-
-        cpu = max(0.0, min(cpu, 100.0))
+            smooth_cpu = 0.0
+            _ema_cache[pid] = 0.0
 
         results.append({
             "pid": pid,
             "ppid": proc["ppid"],
             "name": proc["name"],
             "threads": proc["threads"],
-            "cpu_percent": cpu,
+            "cpu_percent": round(smooth_cpu, 2), # Rounding helps UI jitter
             "rss_bytes": proc["rss_bytes"],
         })
-
-        # Update cache in-place
+        # Update in-place
         prev_cache[pid] = proc
 
-    # Evict dead pids
-    # We do this by checking keys in prev_cache that are NOT in seen_pids
-    dead_pids = [pid for pid in prev_cache if pid not in seen_pids]
-    for pid in dead_pids:
-        del prev_cache[pid]
+    # Evict dead pids from cache
+    # did you know: i hate the eviction notice from tf2
+    dead_pids = [p for p in prev_cache if p not in seen_pids]
+    for p in dead_pids:
+        del prev_cache[p]
+        if p in _ema_cache: del _ema_cache[p]
 
     return results

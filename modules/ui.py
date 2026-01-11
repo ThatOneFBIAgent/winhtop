@@ -4,30 +4,126 @@ from .state import state
 from .config import *
 from .utils import get_terminal_size, draw_bar, format_bytes
 
+# Startup splash messages
+STARTUP_MESSAGES = [
+    "Initializing terminal magic...",
+    "Poking the system kernel...",
+    "Interrogating your CPU...",
+    "Snooping on your storage...",
+    "Waking up the GPU...",
+    "Collecting process breadcrumbs...",
+    "Priming the performance counters...",
+    "Polishing the UI...",
+    "Reordering electrons...",
+    "Compiling bitstreams...",
+    "Calibrating flux capacitor...",
+    "Reticulating splines...",
+]
+
+def render_startup(step: int, total_steps: int, message: str = None):
+    """Render a startup splash screen with progress.
+    
+    Args:
+        step: Current step number (0-indexed)
+        total_steps: Total number of steps
+        message: Optional custom message, otherwise uses STARTUP_MESSAGES
+    """
+    cols, rows, _ = get_terminal_size()
+    
+    # Calculate progress
+    progress = min(100, int((step / max(1, total_steps)) * 100))
+    
+    # Get message
+    if message is None:
+        msg_idx = min(step, len(STARTUP_MESSAGES) - 1)
+        message = STARTUP_MESSAGES[msg_idx]
+    
+    # ASCII art logo
+    # cant we use literals so this doesnt look like shit?
+    logo = [
+        "   __    __        _____  ___  ___ ",
+        "  / / /\\ \\ \\/\\  /\\/__   \\/___\\/ _ \\",
+        "  \\ \\/  \\/ / /_/ /  / /\\//  // /_)/",
+        "   \\  /\\  / __  /  / / / \\_// ___/ ",
+        "    \\/  \\/\\/ /_/   \\/  \\___/\\/     ",
+    ]
+    
+    # We built this buffer on line by line (Heyo!)
+    lines = []
+    
+    # Vertical centering
+    content_height = len(logo) + 6
+    start_row = max(0, (rows - content_height) // 2)
+    
+    # Fill top padding
+    for _ in range(start_row):
+        lines.append("\033[K") # Empty line
+        
+    # Draw Logo
+    for line in logo:
+        padding = max(0, (cols - len(line)) // 2)
+        lines.append(f"{' ' * padding}{C_CYAN}{C_BOLD}{line}{C_RESET}\033[K")
+        
+    lines.append("\033[K")
+    lines.append("\033[K")
+    
+    # Draw Progress Bar
+    bar_width = min(50, cols - 20)
+    filled = int((progress / 100) * bar_width)
+    empty = bar_width - filled
+    
+    bar_str = f"{C_GREEN}{'█' * filled}{C_DIM}{'░' * empty}{C_RESET}"
+    progress_text = f"  [{bar_str}] {C_BOLD}{progress:3d}%{C_RESET}"
+    
+    # Center progress bar
+    # Text length approx bar_width + 12 chars invisible chars don't count for padding calculation but needed for total len
+    # We visually center based on visible width ~ bar_width + 8
+    pad_len = max(0, (cols - (bar_width + 8)) // 2)
+    lines.append(f"{' ' * pad_len}{progress_text}\033[K")
+    
+    lines.append("\033[K")
+    
+    # Draw Message
+    msg_len = len(message)
+    msg_pad = max(0, (cols - msg_len) // 2)
+    lines.append(f"{' ' * msg_pad}{C_YELLOW}{message}{C_RESET}\033[K")
+    
+    # Fill rest of screen
+    sys.stdout.write("\033[H") # Home
+    
+    # Output limited to rows to avoid scroll
+    # We need to construct string carefully
+    final_output = "\n".join(lines)
+    sys.stdout.write(final_output)
+    
+    # Clear rest of screen below content
+    sys.stdout.write("\033[J")
+    sys.stdout.flush()
+
 def render():
     """Render the entire UI."""
-    cols, rows = get_terminal_size()
+    cols, rows, toosmall = get_terminal_size()
     
     # Detect terminal resize
     if (cols, rows) != state.prev_term_size:
         sys.stdout.write("\033[2J")
         state.prev_term_size = (cols, rows)
     
-    # Validation for extremely small windows to prevent crash
-    if cols < 79 or rows < 18:
-        return
-    
     # We build the buffer line by line.
     lines = []
     
-    # --- Helper to add a line with safe ANSI handling ---
+    # Detect if the terminal is too small and write to status message
+    if toosmall:
+        state.status_message = "Window too small!"
+
+    # Helper to add a line with safe ANSI handling
     def add_line(text, bg_color=None):
         if bg_color:
             lines.append(f"{bg_color}{text}{C_RESET}\033[K")
         else:
             lines.append(f"{text}{C_RESET}\033[K")
 
-    # --- Header: Hardware Info ---
+    # Header: Hardware Info
     gpu_name_short = state.sys_stats['gpu_name'][:25] if state.sys_stats['gpu_available'] else "No GPU"
     cpu_name_short = state.sys_stats['cpu_name'][:35]
     
@@ -35,7 +131,7 @@ def render():
     padding_len = max(0, cols - len(header_content)) # approx check
     lines.append(f"{C_BG_HEADER}{C_BOLD}{header_content}{' ' * padding_len}{C_RESET}")
     
-    # --- Command Bar ---
+    # Command Bar
     speed_indicator = f"[{state.current_refresh_rate}]"
     cmd_display = f" > {state.input_buffer}"
     vis_len = len(cmd_display) + len(speed_indicator) + 1 
@@ -45,7 +141,7 @@ def render():
     
     lines.append(f"{C_DIM}{'─' * cols}{C_RESET}\033[K")
     
-    # --- System Monitor ---
+    # System Monitor
     # Reserve header(3), footer(header+status+sep=3), min_proc(1) -> 7 lines reserved.
     max_sys_mon_lines = max(1, rows - 7)
     sys_mon_lines = []
