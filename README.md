@@ -79,7 +79,7 @@ Some security vendors may block the main .exe due using the same headers as malw
 This installs WinHtop to the same location used by the packaged installer/script, but transparency is important
 
 ```bash
-git clone https://github.com/yourusername/winhtop.git
+git clone https://github.com/ThatOneFBIAgent/winhtop.git
 cd winhtop
 pip install --user -r requirements.txt
 ```
