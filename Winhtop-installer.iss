@@ -1,61 +1,132 @@
-; ================================
-; WinHtop Installer (Inno 6.x)
-; ================================
+; =========================================================
+; WinHtop Installer (v0.5)
+; Optimized for Inno Setup 6.6.1+
+; =========================================================
+
+#define MyAppName "WinHtop"
+#define MyAppVersion "0.5"
+#define MyAppPublisher "Iza Carlos"
+#define MyAppExeName "winhtop.exe"
 
 [Setup]
-AppName=WinHtop
-AppVersion=0.5
-AppPublisher=Iza Carlos
-DefaultDirName={localappdata}\Programs\WinHtop
-DisableDirPage=yes
-DisableProgramGroupPage=yes
-OutputDir=.
-OutputBaseFilename=WinHtop-Setup
-Compression=lzma
-SolidCompression=yes
-UninstallDisplayIcon={app}\winhtop.exe
-PrivilegesRequired=lowest
-ArchitecturesInstallIn64BitMode=x64compatible
-CloseApplications=force
-UsePreviousAppDir=yes
-VersionInfoDescription=WinHtop Installer
-VersionInfoVersion=1.0.0.0
-VersionInfoCompany=WinHtop Project
-VersionInfoProductName=WinHtop
-VersionInfoProductVersion=1.0
+; --- Unique Identity ---
+AppId={{C6E2A3B4-D1F2-4EBA-BD3F-6A7C10B7B7C2}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+AppPublisher={#MyAppPublisher}
+DefaultDirName={localappdata}\Programs\{#MyAppName}
+DefaultGroupName={#MyAppName}
 
-; Installer icon + EXE meta
+; --- UI and Logic ---
+WizardStyle=modern
 SetupIconFile=assets\winhtop.ico
+UninstallDisplayIcon={app}\{#MyAppExeName}
+Compression=lzma2/ultra64
+SolidCompression=yes
+PrivilegesRequired=lowest
+CloseApplications=force
 
-[Files]
-Source: "dist\winhtop.exe"; DestDir: "{app}"; Flags: ignoreversion
+; --- The "Professional" Refresh Flag ---
+; This handles the environment refresh automatically at the end of installation
+ChangesEnvironment=yes
+
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "addpath"; Description: "Add WinHtop to PATH (recommended)"; Flags: unchecked
-Name: "desktopicon"; Description: "Create Desktop Shortcut"; Flags: unchecked
+Name: "addpath"; Description: "Add to PATH (Recommended)"; Flags: checkedonce
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
+
+[Files]
+Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{userstartmenu}\WinHtop"; Filename: "{app}\winhtop.exe"
-Name: "{userdesktop}\WinHtop"; Filename: "{app}\winhtop.exe"; Tasks: desktopicon
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
-; Optional Win+X (Power Menu) entry
-; Comment out if you don't want this behavior
-; Name: "{userappdata}\Microsoft\Windows\WinX\Group3\WinHtop.lnk"; Filename: "{app}\winhtop.exe"; Flags: createonlyiffileexists
+[Code]
+// ============================================================================
+// WINDOWS API DECLARATIONS
+// ============================================================================
+type
+  LongPtr = LongInt;
 
-[Run]
-; Add PATH entry (user-scope) if task selected
-Filename: "{cmd}"; \
-Parameters: "/C setx PATH ""%PATH%;{app}"""; \
-Flags: runhidden; Tasks: addpath
+const
+  // HWND_BROADCAST is already defined by Inno Setup, so we don't list it here.
+  WM_SETTINGCHANGE = $001A;
+  SMTO_ABORTIFHUNG = $0002;
 
-; Refresh runtime PATH so new shells see it immediately
-Filename: "{cmd}"; \
-Parameters: "/C powershell -command ""$p=[Environment]::GetEnvironmentVariable('Path','User'); if(-not($p.Contains('{app}'))) [Environment]::SetEnvironmentVariable('Path',$p+';{app}','User')"""; \
-Flags: runhidden; Tasks: addpath
+// We only need to declare the function itself. 
+// Inno Setup 6.x already knows types like HWND, UINT, and LongInt.
+function SendMessageTimeout(hWnd: HWND; Msg: UINT; wParam: LongPtr; lParam: String; fuFlags: UINT; uTimeout: UINT; var lpdwResult: LongPtr): LongInt;
+  external 'SendMessageTimeoutW@user32.dll stdcall';
 
-[UninstallRun]
-; Remove PATH entry on uninstall (only user scope)
-Filename: "{cmd}"; \
-Parameters: "/C powershell -command ""$p=[Environment]::GetEnvironmentVariable('Path','User'); $np=$p -replace ';{app}',''; [Environment]::SetEnvironmentVariable('Path',$np,'User')"""; \
-Flags: runhidden; \
-RunOnceId: "RemoveUserPathWinHtop"
+// ============================================================================
+// PATH MANIPULATION LOGIC
+// ============================================================================
+
+procedure RefreshEnvironment();
+var
+  MsgResult: LongPtr;
+begin
+  // We use the built-in HWND_BROADCAST constant here
+  SendMessageTimeout(HWND_BROADCAST, WM_SETTINGCHANGE, 0, 'Environment', SMTO_ABORTIFHUNG, 5000, MsgResult);
+end;
+
+procedure UpdatePath(PathToAdd: string);
+var
+  OldPath: string;
+  NewPath: string;
+begin
+  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', OldPath) then
+    OldPath := '';
+
+  if Pos(Uppercase(PathToAdd), Uppercase(OldPath)) = 0 then
+  begin
+    NewPath := OldPath;
+    if (NewPath <> '') and (NewPath[Length(NewPath)] <> ';') then
+      NewPath := NewPath + ';';
+    NewPath := NewPath + PathToAdd;
+
+    if RegWriteStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', NewPath) then
+      RefreshEnvironment();
+  end;
+end;
+
+procedure RemovePath(PathToRemove: string);
+var
+  OldPath: string;
+  NewPath: string;
+  P: Integer;
+begin
+  if RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', OldPath) then
+  begin
+    P := Pos(Uppercase(PathToRemove), Uppercase(OldPath));
+    if P > 0 then
+    begin
+      NewPath := OldPath;
+      Delete(NewPath, P, Length(PathToRemove));
+      
+      StringChangeEx(NewPath, ';;', ';', True);
+      if (Length(NewPath) > 0) and (NewPath[Length(NewPath)] = ';') then
+        Delete(NewPath, Length(NewPath), 1);
+      if (Length(NewPath) > 0) and (NewPath[1] = ';') then
+        Delete(NewPath, 1, 1);
+
+      if RegWriteStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', NewPath) then
+        RefreshEnvironment();
+    end;
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if (CurStep = ssPostInstall) and WizardIsTaskSelected('addpath') then
+    UpdatePath(ExpandConstant('{app}'));
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    RemovePath(ExpandConstant('{app}'));
+end;
