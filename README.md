@@ -37,6 +37,8 @@ A text based user interface (TUI) task manager for Windows, inspired by `htop`.
 - Filter processes by name
 - Color-coded high CPU usage
 
+<img width="1105" height="618" alt="Example" src="https://github.com/user-attachments/assets/2497e1c6-b07f-4758-98da-ecb470156bfd" />
+
 ### Commands
 
 | Command | Description |
