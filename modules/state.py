@@ -1,4 +1,10 @@
-"""Global state container"""
+#                                __    __        _____  ___  ___ 
+#                               / / /\ \ \/\  /\/__   \/___\/ _ \
+#                               \ \/  \/ / /_/ /  / /\//  // /_)/
+#                                \  /\  / __  /  / / / \_// ___/ 
+#                                 \/  \/\/ /_/   \/  \___/\/     
+#                                                                
+#            STORING STATES FOR OTHER MODULES TO ACCESS AND MODIFY, AND TO STORE SYSTEM DATA
 
 class AppState:
     def __init__(self):
@@ -58,3 +64,4 @@ class AppState:
 
 # Singleton instance
 state = AppState()
+# "data" as in cpu, gpu data you walnuts.

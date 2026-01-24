@@ -1,4 +1,11 @@
-"""Process info/list module using native windows APIs"""
+#                                __    __        _____  ___  ___ 
+#                               / / /\ \ \/\  /\/__   \/___\/ _ \
+#                               \ \/  \/ / /_/ /  / /\//  // /_)/
+#                                \  /\  / __  /  / / / \_// ___/ 
+#                                 \/  \/\/ /_/   \/  \___/\/     
+#                                                                
+#         I LIKE PAIN, SO LET'S USE CTYPES AND HALF DOCUMENT WINDOWS APIS FOR PROCESS UPDATE!
+
 import ctypes
 import ctypes.wintypes as wt
 import time

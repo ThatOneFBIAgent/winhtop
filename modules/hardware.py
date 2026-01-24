@@ -1,4 +1,11 @@
-"""Hardware info module"""
+#                                __    __        _____  ___  ___ 
+#                               / / /\ \ \/\  /\/__   \/___\/ _ \
+#                               \ \/  \/ / /_/ /  / /\//  // /_)/
+#                                \  /\  / __  /  / / / \_// ___/ 
+#                                 \/  \/\/ /_/   \/  \___/\/     
+#                                                                
+#         THE CODE ISNT A GENIE, IT DOESN'T KNOW WHAT YOUR HARDWARE IS, SO THIS TELLS IT.
+
 import psutil
 import time
 import subprocess

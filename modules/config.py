@@ -1,3 +1,5 @@
+# yeah im not putting corny shit for the single file storing constants and speeds.
+# said the dumbass "iza carlos" smh - 23 / 01 / 2026
 
 # ANSI Colors & Styling
 C_RESET = "\033[0m"

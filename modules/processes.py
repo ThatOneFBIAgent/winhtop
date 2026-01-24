@@ -1,4 +1,11 @@
-"""Process info/list module"""
+#                                __    __        _____  ___  ___ 
+#                               / / /\ \ \/\  /\/__   \/___\/ _ \
+#                               \ \/  \/ / /_/ /  / /\//  // /_)/
+#                                \  /\  / __  /  / / / \_// ___/ 
+#                                 \/  \/\/ /_/   \/  \___/\/     
+#                                                                
+#           PSUTIL IS STILL UTIL HERE, MAINLY FOR GENERAL INFORMATION LIKE DRIVES OR CPU.
+
 import psutil
 import time
 from .state import state

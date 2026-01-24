@@ -1,13 +1,10 @@
 __pycache__
 *.toc
-*.pyz
-*.pyc
-build/*.txt
-build/*.html
-build/*.pkg
-build/*.zip
+*.py[cod]
+*.log
 build/*
 build
 build/winhtop
-
-# apparently i cant just ignore the build folder fml
+task_manager.dist
+task_manager.onefile-build
+task_manager.build

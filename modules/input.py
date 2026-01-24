@@ -1,4 +1,11 @@
-"""Input detection module"""
+#                                __    __        _____  ___  ___ 
+#                               / / /\ \ \/\  /\/__   \/___\/ _ \
+#                               \ \/  \/ / /_/ /  / /\//  // /_)/
+#                                \  /\  / __  /  / / / \_// ___/ 
+#                                 \/  \/\/ /_/   \/  \___/\/     
+#                                                                
+#          BECAUSE ANY GOOD HTOP CLONE/INSPIRED PROJECT NEEDS AN INPUT FORM, THIS HANDLES THAT.
+
 import msvcrt
 import psutil
 from .state import state

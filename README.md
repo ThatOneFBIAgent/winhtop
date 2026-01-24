@@ -1,4 +1,4 @@
-```
+```bash
                                                                                                                                ______   
    _______     _______     ____________  _____    _____           __     __      ________    ________         ____       _____|\     \  
   /      /|   |\      \   /            \|\    \   \    \         /  \   /  \    /        \  /        \    ____\_  \__   /     / |     | 
@@ -18,6 +18,7 @@ A text based user interface (TUI) task manager for Windows, inspired by `htop`.
 ## Features
 
 ### System Monitor
+
 - **Hardware Info**: CPU model and Disk model displayed at top
 - **CPU**: Per-core usage bars with color coding + total average
 - **GPU**: GPU name and utilization (heuristic detection on discrete or integrated)
@@ -29,6 +30,7 @@ A text based user interface (TUI) task manager for Windows, inspired by `htop`.
 - **Secrets**: Maybe if you read the source code you can find something interesting
 
 ### Process Manager
+
 - Scrollable process list (Arrow Keys, PgUp/PgDn, Home/End)
 - Accurate(ish) per-process CPU% (calculated from cpu_times)
 - Sort by PID, Name, CPU%, or Memory%
@@ -36,6 +38,7 @@ A text based user interface (TUI) task manager for Windows, inspired by `htop`.
 - Color-coded high CPU usage
 
 ### Commands
+
 | Command | Description |
 |---------|-------------|
 | `kill <pid\|name>` | Terminate process(es) |
@@ -52,6 +55,7 @@ A text based user interface (TUI) task manager for Windows, inspired by `htop`.
 Do be warned that faster refresh rates (above superfast) cause delta calculations to drift heavily, making the general values less accurate and for the bars to jump unexpectedly.
 
 ### Controls
+
 | Key | Action |
 |-----|--------|
 | ↑/↓ | Scroll process list |
@@ -66,13 +70,14 @@ Do be warned that faster refresh rates (above superfast) cause delta calculation
 Simply go to releases and download the latest installer or use the ps1 files attached, choose your options (ps1 does not support this) and you're ready to use winhtop in the terminal. Uninstalling should be easy aswell thru the installer, or the uninstall ps1 file.
 
 Small disclaimer:
-Some security vendors may block the main .exe due using the same headers as malware (this is a known pyinstaller [issue](https://github.com/pyinstaller/pyinstaller/issues/6754), i'll be looking into using a different method), but rest assured it can't do anything malicious. 
+Some security vendors may block the main .exe due using the same headers as malware (this is a known pyinstaller [issue](https://github.com/pyinstaller/pyinstaller/issues/6754), i'll be looking into using a different method), but rest assured it can't do anything malicious.
 
 ## Requirements
 
 - Windows 10/11
 - Python 3.13+
 - `psutil`
+- `sounddevice`
 
 ## Installation (DIY)
 
@@ -111,15 +116,18 @@ setx PATH "%PATH%;%LOCALAPPDATA%\Programs\WinHtop"
 ```
 
 Open a new terminal, then run:
+
 ```bash
 winhtop
 ```
 
 Uninstalling is as easy as:
 Deleting the program folder
+
 ```bash
 rmdir /S /Q "%LOCALAPPDATA%\Programs\WinHtop"
 ```
+
 And removing the PATH entry, optional but tidy
 
 ```bash
@@ -129,6 +137,7 @@ setx PATH "%PATH:;%LOCALAPPDATA%\Programs\WinHtop=%"
 ## Disclaimer
 
 This program (or the installer attached) is unable to:
+
 - Change registry values (apart from uninstall marking)
 - Sniff the network
 - Or other malicious activities

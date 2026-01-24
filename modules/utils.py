@@ -1,4 +1,11 @@
-"""Utility functions module"""
+#                                __    __        _____  ___  ___ 
+#                               / / /\ \ \/\  /\/__   \/___\/ _ \
+#                               \ \/  \/ / /_/ /  / /\//  // /_)/
+#                                \  /\  / __  /  / / / \_// ___/ 
+#                                 \/  \/\/ /_/   \/  \___/\/     
+#                                                                
+#                            HATRED WITHIN, UTILITIES SHALL CONSUME
+
 import os
 from .config import *
 

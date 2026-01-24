@@ -1,4 +1,11 @@
-"""UI rendering module"""
+#                                __    __        _____  ___  ___ 
+#                               / / /\ \ \/\  /\/__   \/___\/ _ \
+#                               \ \/  \/ / /_/ /  / /\//  // /_)/
+#                                \  /\  / __  /  / / / \_// ___/ 
+#                                 \/  \/\/ /_/   \/  \___/\/     
+#                                                                
+#                     UI RENDERING MODULE, Y'KNOW TO ACTUALLY DISPLAY STUFF.
+
 import sys
 from .state import state
 from .config import *
@@ -317,3 +324,6 @@ def render():
     sys.stdout.write("\n".join(final_output))
     sys.stdout.write("\033[J") # Clear remaining bottom
     sys.stdout.flush()
+
+# what's "rich"? never heard of 'er!
+# i wish i knew sooner but oh well

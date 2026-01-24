@@ -5,7 +5,8 @@
 #                                \  /\  / __  /  / / / \_// ___/ 
 #                                 \/  \/\/ /_/   \/  \___/\/     
 #                                                                
-#                               
+#               MAIN CODE ENTRY POINT, LOOKING FOR SOMETHING? TRY THE MODULES FOLDER!
+
 import sys
 import os
 import time

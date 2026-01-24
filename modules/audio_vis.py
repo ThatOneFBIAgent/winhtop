@@ -1,327 +1,263 @@
-"""
-Audio Visualizer module.
-Uses WASAPI loopback to capture Windows audio output and perform FFT analysis.
-"""
+#                                __    __        _____  ___  ___ 
+#                               / / /\ \ \/\  /\/__   \/___\/ _ \
+#                               \ \/  \/ / /_/ /  / /\//  // /_)/
+#                                \  /\  / __  /  / / / \_// ___/ 
+#                                 \/  \/\/ /_/   \/  \___/\/     
+#                                                                
+#            BECUASE ANY GOOD APP NEEDS A EASTER EGG! THIS PROCESSES AUDIO INFO FOR LATER
 
 import threading
 import time
 
-# Graceful import handling
+# if shit breaks put a logger in here
+
+# look at ln 13
+
 AUDIO_AVAILABLE = False
 try:
     import numpy as np
     import sounddevice as sd
+    # Try to see if the dll loaded
+    _ = sd.query_devices()
     AUDIO_AVAILABLE = True
-except ImportError:
+except Exception:
+    # If anything fails (ImportError, OSError for DLLs, etc.), party mode is disabled
     np = None
     sd = None
 
 
 class AudioVisualizer:
     """
-    Captures system audio via WASAPI loopback and provides frequency band magnitudes.
-    Thread-safe design for use with the main render loop.
+    Captures system audio via WASAPI loopback.
+    Includes 'Silence Detection' and 'Gain Boosting'.
     """
     
     # Frequency band definitions
-    BASS_LOW = 60       # Hz
-    BASS_HIGH = 120     # Hz
-    LOW_MID_LOW = 120   # Hz
-    LOW_MID_HIGH = 500  # Hz
-    HIGH_MID_LOW = 2000 # Hz
-    HIGH_MID_HIGH = 6000 # Hz
+    BASS_LOW = 60
+    BASS_HIGH = 120
+    LOW_MID_LOW = 120
+    LOW_MID_HIGH = 500
+    HIGH_MID_LOW = 2000
+    HIGH_MID_HIGH = 6000
     
     def __init__(self, num_cpu_cores=8):
-        """Initialize the audio visualizer.
-        
-        Args:
-            num_cpu_cores: Number of CPU cores to generate bands for
-        """
         if not AUDIO_AVAILABLE:
-            raise RuntimeError("Audio dependencies not available")
+            return
         
         self.num_cpu_cores = num_cpu_cores
-        self.sample_rate = 44100
-        self.block_size = 2048  # FFT size
+        self.block_size = 2048
         
-        # Magnitude values (0-100 scale for bar display)
+        # Thread safety
         self._lock = threading.Lock()
-        self._ram_magnitude = 0.0       # Bass (60-120 Hz)
-        self._swap_magnitude = 0.0      # Low-mid (120-500 Hz)  
-        self._disk_magnitude = 0.0      # High-mid (2-6 kHz)
-        self._cpu_magnitudes = [0.0] * num_cpu_cores  # Log-spaced bands
+        self._ram_magnitude = 0.0
+        self._swap_magnitude = 0.0
+        self._disk_magnitude = 0.0
+        self._cpu_magnitudes = [0.0] * num_cpu_cores
         
-        # Audio stream
+        # Audio internals
         self._stream = None
         self._running = False
-        
-        # Pre-compute CPU frequency bands (log-spaced from 200Hz to 16kHz)
         self._cpu_freq_bands = self._compute_cpu_bands()
         
-        # Global amplitude multiplier for fine-tuning
-        self.amplitude = 2.0
-        
-        # Smoothing factor (0-1, higher = smoother but less responsive)
-        self._smoothing = 0.4
-    
+        # Auto-Gain Control (AGC)
+        self.base_amplitude = 0.7 # early testing shows this to be *very* sensitive
+        self.current_max_peak = 0.01
+
+    def _get_safe_wasapi_settings(self):
+        """Attempts to create WASAPI settings without crashing on version mismatches."""
+        try:
+            # We try passing it as a dict to see if the constructor accepts it
+            return sd.WasapiSettings(exclusive=False, loopback=True)
+        except (TypeError, Exception) as e:
+            # logging.warning(f"WASAPI Loopback flag rejected: {e}")
+            return None
+
     def _compute_cpu_bands(self):
-        """Compute log-spaced frequency bands for CPU cores."""
-        # Log-space from 200Hz to 16kHz
         min_freq = 200
         max_freq = 16000
-        
-        # Generate n+1 edges for n bands
         log_min = np.log10(min_freq)
         log_max = np.log10(max_freq)
         edges = np.logspace(log_min, log_max, self.num_cpu_cores + 1)
-        
-        # Return list of (low, high) tuples
         return [(edges[i], edges[i+1]) for i in range(self.num_cpu_cores)]
     
-    def _freq_to_bin(self, freq):
-        """Convert frequency to FFT bin index."""
-        return int(freq * self.block_size / self.sample_rate)
+    def _freq_to_bin(self, freq, sample_rate):
+        return int(freq * self.block_size / sample_rate)
     
-    def _get_band_magnitude(self, fft_magnitudes, low_freq, high_freq):
-        """Get average magnitude for a frequency band."""
-        low_bin = max(1, self._freq_to_bin(low_freq))
-        high_bin = min(len(fft_magnitudes) - 1, self._freq_to_bin(high_freq))
+    def _get_band_magnitude(self, fft_magnitudes, low_freq, high_freq, sample_rate):
+        low_bin = max(1, self._freq_to_bin(low_freq, sample_rate))
+        high_bin = min(len(fft_magnitudes) - 1, self._freq_to_bin(high_freq, sample_rate))
         
-        if high_bin <= low_bin:
-            return 0.0
+        if high_bin <= low_bin: return 0.0
         
-        # Average magnitude in band
         band = fft_magnitudes[low_bin:high_bin]
-        if len(band) == 0:
-            return 0.0
+        if len(band) == 0: return 0.0
         
         return float(np.mean(band))
-    
-    def _audio_callback(self, indata, frames, time_info, status):
-        """Process incoming audio data."""
-        if status:
-            pass  # Ignore status messages
-        
-        # Convert to mono if stereo
-        if len(indata.shape) > 1:
-            audio = np.mean(indata, axis=1)
-        else:
-            audio = indata.flatten()
-        
-        # Apply window and compute FFT
-        window = np.hanning(len(audio))
-        windowed = audio * window
-        fft = np.fft.rfft(windowed)
-        magnitudes = np.abs(fft)
-        
-        # Normalize by block size to get approx 0-1 range
-        # Increasing the divisor makes it more sensitive (e.g., /12 instead of /4)
-        magnitudes = magnitudes / (len(audio) / 12)
-        
-        # Extract band magnitudes using a custom scaling
-        # We don't normalize the whole array anymore, so volume is preserved.
-        
-        def get_scaled_mag(low, high, boost=1.0):
-            val = self._get_band_magnitude(magnitudes, low, high)
-            
-            # Apply global amplitude and local boost
-            val = val * self.amplitude * boost
-            
-            if val <= 0.0001: 
-                return 0.0
-            
-            # Sharper log curve to boost low-level signals more aggressively
-            # val=0.01 -> 0.17
-            # val=0.1 -> 0.47
-            # val=1.0 -> 1.0
-            scaled = np.log10(1 + 39 * val) / np.log10(40)
-            
-            return min(100.0, scaled * 100.0)
 
-        # Apply mild weighting to balance spectrum (bass is naturally strong)
-        ram_mag = get_scaled_mag(self.BASS_LOW, self.BASS_HIGH, boost=0.7) # Bass
-        swap_mag = get_scaled_mag(self.LOW_MID_LOW, self.LOW_MID_HIGH, boost=1.0) # Low Mid
-        disk_mag = get_scaled_mag(self.HIGH_MID_LOW, self.HIGH_MID_HIGH, boost=1.3) # High Mid
-        
-        cpu_mags = []
-        for i, (low, high) in enumerate(self._cpu_freq_bands):
-            # Progressive boost for higher cpu bands
-            freq_boost = 1.0 + (i / len(self._cpu_freq_bands)) * 2.5
-            mag = get_scaled_mag(low, high, boost=freq_boost)
-            cpu_mags.append(mag)
-        
-        # Apply smoothing and update shared state
-        with self._lock:
-            self._ram_magnitude = self._smooth(self._ram_magnitude, ram_mag)
-            self._swap_magnitude = self._smooth(self._swap_magnitude, swap_mag)
-            self._disk_magnitude = self._smooth(self._disk_magnitude, disk_mag)
+    def _audio_callback(self, indata, frames, time_info, status):
+            if status:
+                return
             
-            for i, mag in enumerate(cpu_mags):
-                if i < len(self._cpu_magnitudes):
-                    self._cpu_magnitudes[i] = self._smooth(self._cpu_magnitudes[i], mag)
-    
-    def _smooth(self, old_val, new_val):
-        """Apply exponential smoothing."""
-        return old_val * self._smoothing + new_val * (1 - self._smoothing)
-    
-    def _find_loopback_device(self):
+            # 1. Downmix to Mono
+            if len(indata.shape) > 1:
+                audio = np.mean(indata, axis=1)
+            else:
+                audio = indata.flatten()
+                
+            # 2. Check for silence
+            peak = np.max(np.abs(audio))
+            
+            # If it's silent, we DON'T return. We set target values to 0 
+            # so the smoothing logic pulls the bars down.
+            if peak < 0.0001:
+                with self._lock:
+                    # Apply a slightly faster decay when truly silent
+                    decay = 0.9 
+                    self._ram_magnitude *= decay
+                    self._swap_magnitude *= decay
+                    self._disk_magnitude *= decay
+                    for i in range(len(self._cpu_magnitudes)):
+                        self._cpu_magnitudes[i] *= decay
+                return
+
+            # 3. AGC (Auto Gain Control)
+            # This prevents the "sticky" feeling when volume changes drastically
+            self.current_max_peak = max(peak, self.current_max_peak * 0.995)
+            norm_audio = audio / (self.current_max_peak + 1e-6)
+
+            try:
+                # Window & FFT
+                window = np.hanning(len(norm_audio))
+                windowed = norm_audio * window
+                fft = np.fft.rfft(windowed)
+                magnitudes = np.abs(fft)
+                
+                sr = self._stream.samplerate if self._stream else 44100
+
+                def get_val(low, high, mult=1.0):
+                    mag = self._get_band_magnitude(magnitudes, low, high, sr)
+                    # Visual scaling
+                    mag = mag * mult * self.base_amplitude
+                    if mag <= 0: return 0.0
+                    # Use a steeper log curve to make the bottom end more responsive
+                    return min(100.0, np.log10(1 + mag * 10) * 35)
+
+                # Calculate "Target" values
+                t_ram = get_val(self.BASS_LOW, self.BASS_HIGH, 1.2)
+                t_swap = get_val(self.LOW_MID_LOW, self.LOW_MID_HIGH, 1.0)
+                t_disk = get_val(self.HIGH_MID_LOW, self.HIGH_MID_HIGH, 1.0)
+                t_cpu = [get_val(l, h, 1.5) for (l, h) in self._cpu_freq_bands]
+
+                # 4. Atomic Update with Smoothing
+                # Increased 'new' weight (0.4) to make it feel snappier/less "sticky"
+                with self._lock:
+                    alpha = 0.4
+                    beta = 1.0 - alpha
+                    self._ram_magnitude = (t_ram * alpha) + (self._ram_magnitude * beta)
+                    self._swap_magnitude = (t_swap * alpha) + (self._swap_magnitude * beta)
+                    self._disk_magnitude = (t_disk * alpha) + (self._disk_magnitude * beta)
+                    for i in range(min(len(t_cpu), len(self._cpu_magnitudes))):
+                        self._cpu_magnitudes[i] = (t_cpu[i] * alpha) + (self._cpu_magnitudes[i] * beta)
+                        
+            except Exception as e:
+                pass
+
+    def _iter_priority_devices(self):
         """
-        Pick the best audio source:
-        1. Virtual Output (Voicemeeter B1/B2, VB-Cable) - Direct Capture
-        2. System Default Output - WASAPI Loopback
+        Yields devices based on 'Expansive' priority:
+        1. Voicemeeter Virtual Busses (VAIO, AUX, VAIO3)
+        2. Virtual Audio Cables
+        3. WASAPI Loopback of the Default Output
+        4. Legacy Stereo Mix
         """
         try:
             devices = sd.query_devices()
             host_apis = sd.query_hostapis()
-            
-            # Get default output info for fallback matching
-            def_out = None
+            wasapi_api_idx = next((i for i, h in enumerate(host_apis) if 'wasapi' in h['name'].lower()), -1)
+        except Exception as e:
+            # logging.error(f"Could not query devices: {e}")
+            return
+
+        # PRIORITY 1: Voicemeeter Virtual Busses (B1, B2, AUX)
+        # We look for INPUTS (Recording tab) because these are the 'Output' of the mixer
+        vm_keywords = ['voicemeeter output', 'voicemeeter aux output', 'vaio3 output', 'b1', 'b2']
+        for i, dev in enumerate(devices):
+            name = dev['name'].lower()
+            if any(k in name for k in vm_keywords) and dev['max_input_channels'] > 0:
+                yield (i, False, f"Voicemeeter Bus: {dev['name']}")
+
+        # PRIORITY 2: VB-Cables
+        for i, dev in enumerate(devices):
+            name = dev['name'].lower()
+            if 'virtual cable' in name and dev['max_input_channels'] > 0:
+                yield (i, False, f"Virtual Cable: {dev['name']}")
+
+        # PRIORITY 3: WASAPI Loopback (Stock Windows 10/11)
+        if wasapi_api_idx != -1:
             try:
-                idx = sd.default.device[1]
-                if idx is not None:
-                    def_out = sd.query_devices(idx)
+                default_out_idx = sd.default.device[1]
+                if default_out_idx >= 0:
+                    def_name = devices[default_out_idx]['name']
+                    for i, dev in enumerate(devices):
+                        if dev['hostapi'] == wasapi_api_idx and dev['max_output_channels'] > 0:
+                            if def_name in dev['name'] or dev['name'] in def_name:
+                                yield (i, True, f"WASAPI Loopback: {dev['name']}")
             except: pass
-            
-            candidates = []
-            
-            for i, dev in enumerate(devices):
-                # Must be WASAPI for compatibility/loopback support
-                if 'wasapi' not in host_apis[dev['hostapi']]['name'].lower():
-                    continue
-                    
-                name = dev['name'].lower()
-                
-                # Priority 0: Known Virtual Outputs (Capture devices)
-                # These are "Input" devices in Windows (in_ch > 0) but carry output audio
-                if dev['max_input_channels'] > 0:
-                    if 'voicemeeter' in name and 'out' in name:
-                        # Prioritize B1/Main mix
-                        if 'out b1' in name:
-                            candidates.append((0, i, False, dev['name']))
-                        elif 'out b' in name:
-                            candidates.append((1, i, False, dev['name']))
-                        else:
-                            candidates.append((2, i, False, dev['name']))
-                    
-                    elif 'virtual cable' in name and 'out' in name:
-                        candidates.append((0, i, False, dev['name']))
-                
-                # Priority 10: System Default Output (Loopback)
-                # This ensures we get what the user is actually hearing if they aren't using Voicemeeter capture
-                if def_out and dev['max_output_channels'] > 0:
-                    # Relaxed name matching to find the WASAPI version of the default output
-                    if def_out['name'] in dev['name'] or dev['name'] in def_out['name']:
-                        candidates.append((10, i, True, dev['name']))
-            
-            # Sort by score
-            if candidates:
-                candidates.sort(key=lambda x: x[0])
-                return candidates[0][1], candidates[0][2], candidates[0][3]
-                
-            # Fallback: If nothing matched, try to force the default output index as a loopback source
-            # This is a last resort for systems where name matching fails completely
-            if def_out:
-                 is_wasapi = 'wasapi' in host_apis[def_out['hostapi']]['name'].lower()
-                 return sd.default.device[1], is_wasapi, def_out['name']
-                 
-            return None, False, None
 
-        except Exception:
-            return None, False, None
-    
+        # PRIORITY 4: Legacy Stereo Mix
+        for i, dev in enumerate(devices):
+            name = dev['name'].lower()
+            if ('stereo mix' in name or 'what u hear' in name) and dev['max_input_channels'] > 0:
+                yield (i, False, f"Legacy Mix: {dev['name']}")
+
     def start(self):
-        """Start audio capture."""
-        if self._running:
-            return True
-        
-        device_id, loopback_required, device_name = self._find_loopback_device()
-        
-        if device_id is None:
-            return False
+        if self._running: return True
+        # logging.info("--- Starting Audio Capture ---")
+        # logging.info("Aw shucks you found the secret! Eh, have fun!")
 
-        # Build list of configurations to try
-        configs_to_try = []
-        
-        sample_rates = [48000, 44100, 96000]
-        try:
-            dev_info = sd.query_devices(device_id)
-            default_rate = int(dev_info.get('default_samplerate', 48000))
-            if default_rate not in sample_rates:
-                sample_rates.insert(0, default_rate)
-        except: pass
-
-        for rate in sample_rates:
-            # Config 1: Stereo
-            configs_to_try.append({
-                'device': device_id,
-                'samplerate': rate,
-                'blocksize': self.block_size,
-                'channels': 2,
-                'extra_settings': self._get_wasapi_settings(loopback=loopback_required)
-            })
+        for dev_idx, needs_loopback, name in self._iter_priority_devices():
+            # logging.info(f"Trying Device: {name}")
             
-            # Config 2: Mono (Fallback)
-            configs_to_try.append({
-                'device': device_id,
-                'samplerate': rate,
-                'blocksize': self.block_size,
-                'channels': 1,
-                'extra_settings': self._get_wasapi_settings(loopback=loopback_required)
-            })
-        
-        # CRITICAL: We DO NOT fall back to device=None here.
-        # device=None opens the Default Input (Mic), which we strictly want to avoid.
-        
-        for config in configs_to_try:
             try:
-                extra = config.pop('extra_settings')
-                actual_rate = config['samplerate']
-                if extra:
-                    self._stream = sd.InputStream(callback=self._audio_callback, extra_settings=extra, **config)
-                else:
-                    self._stream = sd.InputStream(callback=self._audio_callback, **config)
+                dev_info = sd.query_devices(dev_idx)
+                samplerate = int(dev_info['default_samplerate'])
                 
+                extra = self._get_safe_wasapi_settings() if needs_loopback else None
+                
+                # If we need loopback but the library rejected the flag, 
+                # this device will likely be silent. Skip it.
+                if needs_loopback and extra is None:
+                    # logging.warning(f"Skipping {name} - Loopback flag required but unsupported.")
+                    continue
+
+                self._stream = sd.InputStream(
+                    device=dev_idx,
+                    channels=min(dev_info['max_input_channels'], 2) if not needs_loopback else 2,
+                    samplerate=samplerate,
+                    callback=self._audio_callback,
+                    blocksize=self.block_size,
+                    extra_settings=extra
+                )
                 self._stream.start()
                 self._running = True
-                self.sample_rate = actual_rate
+                # logging.info(f"Successfully locked onto: {name}")
                 return True
-            except Exception:
+            except Exception as e:
+                # logging.error(f"Failed to open {name}: {e}")
                 continue
         
         return False
-    
-    def _get_wasapi_settings(self, loopback=False):
-        """Get WASAPI settings."""
-        try:
-            return sd.WasapiSettings(exclusive=False, loopback=loopback)
-        except Exception:
-            return None
-    
+
     def stop(self):
-        """Stop audio capture."""
         self._running = False
         if self._stream:
             try:
                 self._stream.stop()
                 self._stream.close()
-            except Exception:
-                pass
+            except Exception: pass
             self._stream = None
-        
-        # Reset magnitudes
-        with self._lock:
-            self._ram_magnitude = 0.0
-            self._swap_magnitude = 0.0
-            self._disk_magnitude = 0.0
-            self._cpu_magnitudes = [0.0] * self.num_cpu_cores
-    
+
     def get_magnitudes(self):
-        """Get current frequency band magnitudes.
-        
-        Returns:
-            dict with keys: 'ram', 'swap', 'disk', 'cpu' (list)
-            All values are 0-100 scale suitable for bar display.
-        """
         with self._lock:
             return {
                 'ram': self._ram_magnitude,
@@ -329,10 +265,7 @@ class AudioVisualizer:
                 'disk': self._disk_magnitude,
                 'cpu': list(self._cpu_magnitudes)
             }
-    
+
     @property
     def is_running(self):
-        """Check if audio capture is active."""
         return self._running
-
-# dont ask how many hours were spent on a FUCKING easter egg of all things
