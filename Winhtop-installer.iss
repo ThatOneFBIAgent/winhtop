@@ -3,7 +3,7 @@
 ; =========================================================
 
 #define MyAppName "WinHtop"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.2.0"
 #define MyAppPublisher "Iza Carlos"
 #define MyAppExeName "winhtop.exe"
 #define MyAppId "C6E2A3B4-D1F2-4EBA-BD3F-6A7C10B7B7C2"

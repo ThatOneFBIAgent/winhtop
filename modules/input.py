@@ -9,6 +9,7 @@
 import msvcrt
 import psutil
 from .state import state
+from . import config
 from .config import *
 from .processes import get_process_tree_info
 try:
@@ -111,7 +112,7 @@ def execute_command(cmd_str):
         return
     
     if cmd == "help":
-        state.status_message = "kill|suspend|resume|info, sort, filter, speed, showdrives, export, quit"
+        state.status_message = "Commands: kill|suspend|resume|info, sort, filter, speed, showdrives, procfull, rich, export, quit"
         return
     
     if cmd == "showdrives":
@@ -121,6 +122,26 @@ def execute_command(cmd_str):
             state.status_message = f"Showing all drives ({drive_count} found)"
         else:
             state.status_message = "Showing only C: drive"
+        return
+    
+    if cmd == "procfull":
+        if arg.lower() == "true":
+            state.procfull_mode = True
+        elif arg.lower() == "false":
+            state.procfull_mode = False
+        else:
+            state.procfull_mode = not state.procfull_mode
+        state.scroll_offset = 0
+        if state.procfull_mode:
+            state.status_message = "Showing parent processes with aggregated children"
+        else:
+            state.status_message = "Showing all processes normally"
+        return
+    
+    if cmd == "rich":
+        config.USE_RICH_UI = not config.USE_RICH_UI
+        config._set_rich_ui_pref(config.USE_RICH_UI)  # Persist to registry
+        state.status_message = f"Rich UI: {'enabled' if config.USE_RICH_UI else 'disabled'} (takes effect on restart)"
         return
     
     if cmd == "speed":
@@ -267,10 +288,19 @@ def execute_command(cmd_str):
     state.status_message = f"{action_names[cmd]} {success}, Errors: {errors}"
 
 def handle_input():
-    """Handle keyboard input (non-blocking)."""
+    """Handle keyboard input (non-blocking).
+    
+    Arrow keys and special keys send a two-byte sequence:
+    First byte: \x00 or \xe0 (prefix)
+    Second byte: key code (e.g., 72=Up, 80=Down)
+    
+    We must read the second byte immediately after detecting the prefix,
+    not wait for it to appear in a later kbhit() check.
+    """
     while msvcrt.kbhit():
         ch = msvcrt.getwch()
         
+        # Handle confirmation prompts
         if state.pending_confirmation is not None:
             if ch.lower() == 'y':
                 execute_pending_action()
@@ -282,27 +312,35 @@ def handle_input():
                 state.input_buffer = ""
                 return
             else:
+                # Consume but ignore other keys during confirmation
                 continue
         
+        # Handle special keys (arrow keys, function keys, etc.)
+        # These come as two-character sequences: \x00 or \xe0 followed by the key code
         if ch in ('\x00', '\xe0'):
-            if msvcrt.kbhit():
-                key2 = msvcrt.getwch()
-                if key2 == 'H':
-                    state.scroll_offset = max(0, state.scroll_offset - 1)
-                elif key2 == 'P': # Down
-                    state.scroll_offset += 1
-                elif key2 == 'I': # PgUp
-                    state.scroll_offset = max(0, state.scroll_offset - 10)
-                elif key2 == 'Q': # PgDn
-                    state.scroll_offset += 10
-                elif key2 == 'G': # Home
-                    state.scroll_offset = 0
-                elif key2 == 'O': # End
-                    state.scroll_offset = max(0, len(state.processes) - 5)
-                elif key2 == 'S': # Del
-                    state.input_buffer = state.input_buffer[:-1]
+            # IMMEDIATELY read the second byte - don't wait for kbhit()
+            # The second byte is always sent right after the prefix
+            key2 = msvcrt.getwch()
+            key_code = ord(key2)
+            
+            if key_code == 72:  # Up arrow
+                state.scroll_offset = max(0, state.scroll_offset - 1)
+            elif key_code == 80:  # Down arrow
+                state.scroll_offset += 1
+            elif key_code == 73:  # PgUp
+                state.scroll_offset = max(0, state.scroll_offset - 10)
+            elif key_code == 81:  # PgDn
+                state.scroll_offset += 10
+            elif key_code == 71:  # Home
+                state.scroll_offset = 0
+            elif key_code == 79:  # End
+                state.scroll_offset = max(0, len(state.processes) - 5)
+            elif key_code == 83:  # Del
+                state.input_buffer = state.input_buffer[:-1]
+            # All other special keys (F1-F12, Insert, etc.) are silently consumed
             continue
         
+        # Normal key handling
         if ch == '\r':
             execute_command(state.input_buffer)
             state.input_buffer = ""

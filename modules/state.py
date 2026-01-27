@@ -61,6 +61,9 @@ class AppState:
         self.party_mode = False
         self.party_visualizer = None
         self.party_prev_refresh_rate = None
+        
+        # Process aggregation mode
+        self.procfull_mode = False
 
 # Singleton instance
 state = AppState()

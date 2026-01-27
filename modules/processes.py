@@ -69,6 +69,7 @@ def get_processes():
         
         pinfo = {
             'pid': pid,
+            'ppid': p.get('ppid', 0),  # For procfull aggregation
             'name': p['name'],
             'cpu_percent': p['cpu_percent'],
             'memory_percent': mem_pct,
@@ -78,6 +79,10 @@ def get_processes():
         
         procs.append(pinfo)
     
+    # Aggregate children into parents if procfull_mode is enabled
+    if state.procfull_mode:
+        procs = aggregate_children(procs)
+    
     # Sort
     try:
         if state.sort_key == 'name':
@@ -86,6 +91,64 @@ def get_processes():
             state.processes = sorted(procs, key=lambda p: p.get(state.sort_key, 0) or 0, reverse=state.sort_desc)
     except:
         state.processes = procs
+
+
+def aggregate_children(proc_list):
+    """When procfull_mode is True, aggregate DIRECT child stats into parent entries.
+    
+    This groups processes by their parent, sums CPU/MEM of DIRECT children only
+    into the parent, and marks parents with a child count indicator.
+    
+    Note: Only direct children are aggregated, not all descendants recursively.
+    This matches typical task manager behavior where e.g., chrome.exe shows
+    its immediate child processes, not the entire tree.
+    """
+    # Build a pid -> process info map
+    pid_map = {p['pid']: p for p in proc_list}
+    
+    # Build parent -> direct children map
+    children_map = {}  # parent_pid -> [child_pinfo, ...]
+    child_pids = set()  # Track which pids are children (to exclude from result)
+    
+    for p in proc_list:
+        ppid = p.get('ppid', 0)
+        # Only consider as child if parent exists in our list and isn't self
+        if ppid in pid_map and ppid != p['pid']:
+            if ppid not in children_map:
+                children_map[ppid] = []
+            children_map[ppid].append(p)
+            child_pids.add(p['pid'])
+    
+    # Build result: only parent processes (those not appearing as children)
+    # or processes with no parent in the list
+    aggregated = []
+    
+    for p in proc_list:
+        pid = p['pid']
+        
+        # Skip processes that are children of another process in the list
+        if pid in child_pids:
+            continue
+        
+        # Get direct children of this process
+        direct_children = children_map.get(pid, [])
+        
+        if direct_children:
+            # Aggregate direct children stats
+            child_cpu = sum(c.get('cpu_percent', 0) for c in direct_children)
+            child_mem = sum(c.get('memory_percent', 0) for c in direct_children)
+            
+            agg_entry = p.copy()
+            agg_entry['cpu_percent'] = p.get('cpu_percent', 0) + child_cpu
+            agg_entry['memory_percent'] = p.get('memory_percent', 0) + child_mem
+            agg_entry['_child_count'] = len(direct_children)
+            aggregated.append(agg_entry)
+        else:
+            # No children, just add as-is
+            aggregated.append(p)
+    
+    return aggregated
+
 
 def get_process_tree_info(targets):
     """Build process tree info showing parent-child relationships."""

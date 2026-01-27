@@ -25,3 +25,29 @@ REFRESH_RATES = {
     # so for about 60 fps:
     "party": 0.0167
 }
+
+# UI Mode Toggle - stored in registry for persistence across runs
+# Uses HKEY_CURRENT_USER\Software\WinHTop\UseRichUI
+import winreg
+
+def _get_rich_ui_pref():
+    """Load USE_RICH_UI from Windows registry."""
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\WinHTop", 0, winreg.KEY_READ)
+        value, _ = winreg.QueryValueEx(key, "UseRichUI")
+        winreg.CloseKey(key)
+        return bool(value)
+    except (FileNotFoundError, OSError):
+        return True  # Default to Rich UI
+
+def _set_rich_ui_pref(enabled: bool):
+    """Save USE_RICH_UI to Windows registry."""
+    try:
+        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\WinHTop")
+        winreg.SetValueEx(key, "UseRichUI", 0, winreg.REG_DWORD, 1 if enabled else 0)
+        winreg.CloseKey(key)
+    except OSError:
+        pass  # Silently fail if can't write
+
+# Load preference on import
+USE_RICH_UI = _get_rich_ui_pref()

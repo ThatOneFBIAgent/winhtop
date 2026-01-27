@@ -20,12 +20,23 @@ if sys.platform != 'win32':
 # Import modules
 try:
     from modules.config import *
+    from modules import config
     from modules.state import state
     from modules.utils import *
     from modules.hardware import get_hardware_info, update_system_stats, update_system_stats_fast, update_system_stats_slow
     from modules.processes import get_processes
-    from modules.ui import render, render_startup
     from modules.input import handle_input 
+    
+    # Conditional Rich UI import
+    if config.USE_RICH_UI:
+        try:
+            from modules.richui import render, render_startup
+        except ImportError as e:
+            print(f"Rich UI failed to load ({e}), falling back to ANSI UI...")
+            from modules.ui import render, render_startup
+            config.USE_RICH_UI = False
+    else:
+        from modules.ui import render, render_startup
 except ImportError as e:
     print(f"Error loading modules: {e}")
     time.sleep(2)
@@ -44,7 +55,8 @@ def main():
     os.system("")
     
     # Clear screen and hide cursor
-    sys.stdout.write("\033[2J\033[?25l")
+    clear_screen()
+    sys.stdout.write("\033[?25l")
     sys.stdout.flush()
     
     # Total initialization steps for progress tracking
@@ -129,6 +141,9 @@ def main():
     bump_progress(5, "Ready to go!")
     time.sleep(0.3)
     
+    # Clear screen after startup to prevent "Ready to go!" from lingering
+    clear_screen()
+    
     try:
         last_update = 0
         last_process_update = 0
@@ -203,7 +218,7 @@ def main():
         
         sys.stdout.write("\033[?25h")  # Show cursor
         sys.stdout.write(C_RESET)
-        sys.stdout.write("\033[2J\033[H")
+        clear_screen()
         print("Exiting Task Manager... Cya!")
         time.sleep(1)
 

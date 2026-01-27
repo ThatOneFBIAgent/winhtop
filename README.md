@@ -53,8 +53,11 @@ A text based user interface (TUI) task manager for Windows, inspired by `htop`.
 | `export [file]` | Export process list to file (default: `processes.txt`) |
 | `quit` | Exit the application |
 | `showdrives` | Toggle display of all drives |
+| `procfull` | Toggle full process info (default: complete) |
+| `rich` | Toggle the use of the Rich UI version (restart required) |
 
-Do be warned that faster refresh rates (above superfast) cause delta calculations to drift heavily, making the general values less accurate and for the bars to jump unexpectedly.
+> [!NOTE]  
+> Fast refresh rates may cause delta calculation (for CPU cores) to drift, I've done my best to mitigate this but it's not perfect.
 
 ### Controls
 
@@ -71,8 +74,9 @@ Do be warned that faster refresh rates (above superfast) cause delta calculation
 
 Simply go to releases and download the latest installer or use the ps1 files attached, choose your options (ps1 does not support this) and you're ready to use winhtop in the terminal. Uninstalling should be easy aswell thru the installer, or the uninstall ps1 file.
 
-Small disclaimer:
-Some security vendors may block the main .exe due using the same headers as malware (this is a known pyinstaller [issue](https://github.com/pyinstaller/pyinstaller/issues/6754), i'll be looking into using a different method), but rest assured it can't do anything malicious.
+
+> [!IMPORTANT]  
+> Some security vendors may block the main .exe due using the same headers as malware (this is a known pyinstaller [issue](https://github.com/pyinstaller/pyinstaller/issues/6754), i'll be looking into using a different method), but rest assured it can't do anything malicious.
 
 ## Requirements
 
@@ -140,11 +144,11 @@ setx PATH "%PATH:;%LOCALAPPDATA%\Programs\WinHtop=%"
 
 This program (or the installer attached) is unable to:
 
-- Change registry values (apart from uninstall marking)
+- Change registry values (It makes an uninstall key from Inno setup and a DWORD for Rich configuration)
 - Sniff the network
 - Or other malicious activities
 
-It is not my responsibility if you also run `kill csrss.exe`, most important system processes are blacklisted/protected from this command though, killing the wrong process can cause system instability or you to be logged out.
-This program is provided as-is, without any warranty. Use at your own risk.
+> [!CAUTION]  
+> It is not my responsibility if you also run `kill csrss.exe`, most important system processes are blacklisted/protected from this command though, killing the wrong process can cause system instability or you to be logged out. This program is provided as-is, without any warranty. Use at your own risk.
 
 Also it may be a bit slow on some lower end systems, but it should work fine for when you need it.

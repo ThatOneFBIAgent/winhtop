@@ -7,7 +7,21 @@
 #                            HATRED WITHIN, UTILITIES SHALL CONSUME
 
 import os
+import sys
 from .config import *
+
+def clear_screen():
+    """Clear screen AND scrollback buffer to prevent artifacts."""
+    if os.name == 'nt':
+        # Windows: 'cls' is the most reliable way to clear scrollback
+        # ANSI \033[3J is often not supported in older conhost/cmd
+        os.system('cls')
+    else:
+        # Unix/Linux: ANSI sequence usually sufficient
+        # \033[3J clears scrollback, \033[2J clears screen, \033[H home
+        sys.stdout.write("\033[3J\033[2J\033[H")
+        sys.stdout.flush() 
+
 
 def get_terminal_size():
     """Get terminal dimensions."""

@@ -9,7 +9,8 @@
 import sys
 from .state import state
 from .config import *
-from .utils import get_terminal_size, draw_bar, format_bytes
+from .config import *
+from .utils import get_terminal_size, draw_bar, format_bytes, clear_screen
 
 # Startup splash messages
 STARTUP_MESSAGES = [
@@ -47,6 +48,7 @@ def render_startup(step: int, total_steps: int, message: str = None):
     
     # ASCII art logo
     # cant we use literals so this doesnt look like shit?
+    # 26/01/26 wtf was i talking about lmao
     logo = [
         "   __    __        _____  ___  ___ ",
         "  / / /\\ \\ \\/\\  /\\/__   \\/___\\/ _ \\",
@@ -111,9 +113,9 @@ def render():
     """Render the entire UI."""
     cols, rows, toosmall = get_terminal_size()
     
-    # Detect terminal resize
+    # Detect terminal resize - full clear with cursor home
     if (cols, rows) != state.prev_term_size:
-        sys.stdout.write("\033[2J")
+        clear_screen()
         state.prev_term_size = (cols, rows)
     
     # We build the buffer line by line.
@@ -287,7 +289,14 @@ def render():
     visible = state.processes[state.scroll_offset : state.scroll_offset + max_proc_rows]
     for p in visible:
         pid = str(p.get('pid', 0)).ljust(8)
-        name = (p.get('name', 'Unknown')[:25]).ljust(27)
+        
+        # Handle procfull mode display
+        name_str = p.get('name', 'Unknown')[:25]
+        child_count = p.get('_child_count', 0)
+        if child_count > 0:
+            name_str = f"{name_str[:20]} [+{child_count}]"
+        name = name_str.ljust(27)
+        
         c_val = p.get('cpu_percent', 0)
         c_str = f"{c_val:5.1f}".ljust(10)
         if c_val > 50: c_str = f"{C_RED}{c_str}{C_RESET}"
@@ -307,9 +316,10 @@ def render():
     # Status
     scroll_info = f"[{state.scroll_offset + 1}-{min(state.scroll_offset + max_proc_rows, len(state.processes))}/{len(state.processes)}]"
     filter_info = f" Filter:'{state.filter_text}'" if state.filter_text else ""
+    procfull_info = " [PROCFULL]" if getattr(state, 'procfull_mode', False) else ""
     status_msg = state.status_message
-    if len(status_msg) > cols - 30: status_msg = status_msg[:cols-30] + "..."
-    status_line = f"{C_BOLD}Status:{C_RESET} {status_msg}  {scroll_info}{filter_info}"
+    if len(status_msg) > cols - 40: status_msg = status_msg[:cols-40] + "..."
+    status_line = f"{C_BOLD}Status:{C_RESET} {status_msg}  {scroll_info}{filter_info}{procfull_info}"
     
     lines.append(status_line + "\033[K")
     
